@@ -1,3 +1,37 @@
+# 构建（Windows 32 位）
+
+此脚本在 Windows 上自动化以下步骤以生成 32 位可执行：
+
+- 克隆并引导 `vcpkg`（如果缺失）
+- 使用 `vcpkg` 安装 `openssl:x86-windows`
+- 使用 `vcpkg` 工具链配置并生成 Win32（`x86`）CMake 构建
+- 将运行时 DLL（如 `libcrypto-3.dll`/`libssl-3.dll`）复制到输出目录
+- 将 `config.example.json` 复制为 `config.json` 到输出目录
+
+使用方法
+
+在项目根目录打开 PowerShell，运行：
+
+```powershell
+.
+\buildwin.ps1
+```
+
+可选参数（示例）：
+
+```powershell
+.
+\buildwin.ps1 -VcpkgDir ".\vcpkg" -BuildDir ".\build_x86" -Triplet "x86-windows" -Config "Release"
+```
+
+前提依赖
+
+- 已安装 `git`, `cmake`, 和 Visual Studio（包含用于 Win32 的 C/C++ 工具链）。
+
+注意
+
+- 脚本会在本仓库根目录创建 `vcpkg` 目录并安装包（需要网络与磁盘空间）。
+- 若要在 CI 中使用，请确保 CI 机器安装了相应的 Visual Studio 组件或改用交叉编译工具链。
 # LLM API Proxy
 
 一个使用 JSON 配置的 C++ OpenAI 兼容中转服务。
