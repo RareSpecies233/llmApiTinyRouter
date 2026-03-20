@@ -12,7 +12,36 @@
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 
+#include <chrono>
+#include <ctime>
+#include <mutex>
 using json = nlohmann::json;
+
+namespace Log {
+static std::ofstream log_stream;
+static std::mutex log_mutex;
+
+void Init(const std::string& path) {
+  std::lock_guard<std::mutex> lk(log_mutex);
+  if (log_stream.is_open()) return;
+  log_stream.open(path, std::ios::out | std::ios::app);
+}
+
+void Write(const std::string& level, const std::string& msg) {
+  std::lock_guard<std::mutex> lk(log_mutex);
+  if (!log_stream.is_open()) return;
+  const auto now = std::chrono::system_clock::now();
+  const std::time_t t = std::chrono::system_clock::to_time_t(now);
+  char buf[32];
+  std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", std::localtime(&t));
+  log_stream << "[" << buf << "] [" << level << "] " << msg << std::endl;
+  log_stream.flush();
+}
+
+void Info(const std::string& msg) { Write("INFO", msg); }
+void Error(const std::string& msg) { Write("ERROR", msg); }
+void Debug(const std::string& msg) { Write("DEBUG", msg); }
+} // namespace Log
 
 struct RouteConfig {
   std::string inbound_key;
@@ -223,8 +252,10 @@ httplib::Result PostUpstream(const ParsedUrl& upstream,
 }
 
 void ProxyRequest(const AppConfig& config, const httplib::Request& req, httplib::Response& res) {
+  Log::Info(std::string("incoming request: ") + req.method + " " + req.path);
   const std::string inbound_key = GetBearerToken(req);
   if (inbound_key.empty()) {
+    Log::Error("missing or invalid Authorization header");
     ReplyJson(res, 401, BuildErrorBody("missing or invalid Authorization header", "authentication_error"));
     return;
   }
@@ -263,8 +294,10 @@ void ProxyRequest(const AppConfig& config, const httplib::Request& req, httplib:
   const auto headers = BuildForwardHeaders(req, *route);
   const auto body = request_json.dump();
 
+  Log::Debug(std::string("forwarding to upstream: ") + (upstream.https ? "https://" : "http://") + upstream.host + ":" + std::to_string(upstream.port) + " " + target_path);
   auto upstream_response = PostUpstream(upstream, target_path, headers, body);
   if (!upstream_response) {
+    Log::Error("failed to connect upstream API");
     ReplyJson(res, 502, BuildErrorBody("failed to connect upstream API", "api_connection_error"));
     return;
   }
@@ -282,6 +315,7 @@ void ProxyRequest(const AppConfig& config, const httplib::Request& req, httplib:
   }
 
   res.body = upstream_response->body;
+  Log::Info(std::string("upstream responded with status ") + std::to_string(upstream_response->status));
 }
 
 int main(int argc, char** argv) {
@@ -295,10 +329,22 @@ int main(int argc, char** argv) {
     return EXIT_FAILURE;
   }
 
+  // 初始化日志
+  Log::Init("llm_api_proxy.log");
+  Log::Info(std::string("starting proxy with config: ") + config_path);
+
   httplib::Server server;
 
   auto handler = [&config](const httplib::Request& req, httplib::Response& res) {
-    ProxyRequest(config, req, res);
+    try {
+      ProxyRequest(config, req, res);
+    } catch (const std::exception& ex) {
+      Log::Error(std::string("unhandled exception in handler: ") + ex.what());
+      ReplyJson(res, 500, BuildErrorBody(std::string("internal server error: ") + ex.what(), "server_error"));
+    } catch (...) {
+      Log::Error("unhandled unknown exception in handler");
+      ReplyJson(res, 500, BuildErrorBody("internal server error", "server_error"));
+    }
   };
 
   server.Post(R"(/v1/chat/completions)", handler);
