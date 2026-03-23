@@ -28,7 +28,7 @@
 - `listen_port`：监听端口
 - `inbound_models`：允许接入的模型名列表，支持多个
 - `inbound_api_keys`：允许接入的 API Key 列表，支持多个
-- `outbound_api_url`：上游 OpenAI 风格 API 地址，例如 `https://api.openai.com`
+- `outbound_api_url`：上游 OpenAI 风格 API 地址，例如 `https://api.openai.com` 或带版本前缀的 `https://dashscope.aliyuncs.com/compatible-mode/v1`
 - `outbound_api_key`：上游 API Key
 - `log_dir`：日志目录
 - `request_body_log_limit`：请求 Body 日志截断长度
@@ -36,7 +36,12 @@
 - `upstream_timeout_seconds`：上游超时时间
 - `verify_upstream_tls`：是否校验上游 TLS 证书
 
-说明：你的原始需求里将“出站 llm api url”写了两次，这里按常见代理场景实现为一个 `outbound_api_url`。它作为上游基础地址，程序会自动拼接客户端请求路径，例如 `/v1/chat/completions`。
+说明：你的原始需求里将“出站 llm api url”写了两次，这里按常见代理场景实现为一个 `outbound_api_url`。它作为上游基础地址，程序会自动兼容以下两种客户端路径：
+
+- `http://host:port/v1/chat/completions`
+- `http://host:port/chat/completions`
+
+同时也兼容上游基础地址带或不带 `/v1` 的两种配置，避免出现重复拼接 `/v1/v1/...` 或缺失 `/v1/...` 的问题。
 
 ## 编译要求
 
@@ -116,7 +121,7 @@ curl http://127.0.0.1:8080/v1/chat/completions \
 
 ## 日志说明
 
-程序会同时输出到控制台和日志文件 `logs/llm_api_proxy.log`，日志内容包括：
+程序会同时输出到控制台和日志文件，文件名按启动时间生成，例如 `logs/llmapi_log_20240601_120000.txt`，日志内容包括：
 
 - 启动配置摘要
 - 入站请求来源 IP、方法、路径、查询串、头信息、Body 预览

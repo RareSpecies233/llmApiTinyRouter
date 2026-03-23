@@ -7,4 +7,6 @@ build-copilot
 
 
 
-logs/llm_api_proxy.log
+logs
+llm_api_proxy
+config.json

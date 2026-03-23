@@ -236,6 +236,31 @@ std::string join_paths(const std::string& base_path, const std::string& request_
     return base_path + request_path;
 }
 
+bool path_has_v1_prefix(const std::string& path) {
+    return path == "/v1" || path.rfind("/v1/", 0) == 0;
+}
+
+bool base_path_has_v1_suffix(const std::string& path) {
+    return path.size() >= 3 && path.compare(path.size() - 3, 3, "/v1") == 0;
+}
+
+std::string normalize_openai_path(const std::string& base_path, const std::string& request_path) {
+    if (request_path.empty()) {
+        return "/";
+    }
+
+    if (path_has_v1_prefix(request_path) && base_path_has_v1_suffix(base_path)) {
+        const auto normalized = request_path.substr(3);
+        return normalized.empty() ? "/" : normalized;
+    }
+
+    if (!path_has_v1_prefix(request_path) && !base_path_has_v1_suffix(base_path) && request_path != "/") {
+        return "/v1" + request_path;
+    }
+
+    return request_path;
+}
+
 size_t write_body_callback(char* ptr, size_t size, size_t nmemb, void* userdata) {
     auto* buffer = static_cast<std::string*>(userdata);
     buffer->append(ptr, size * nmemb);
@@ -284,8 +309,17 @@ std::string append_query_string(const httplib::Request& req, const std::string& 
     return output.str();
 }
 
+std::string query_string_only(const httplib::Request& req) {
+    const auto query = append_query_string(req, "");
+    if (query.empty()) {
+        return "";
+    }
+    return query.front() == '?' ? query.substr(1) : query;
+}
+
 std::string build_upstream_url(const UrlParts& url_parts, const httplib::Request& req) {
-    const auto path = join_paths(url_parts.base_path, req.path);
+    const auto normalized_path = normalize_openai_path(url_parts.base_path, req.path);
+    const auto path = join_paths(url_parts.base_path, normalized_path);
     return url_parts.scheme + "://" + url_parts.host + ':' + std::to_string(url_parts.port) + append_query_string(req, path);
 }
 
@@ -413,7 +447,7 @@ void log_request(
         req.remote_port,
         req.method,
         req.path,
-        append_query_string(req, "").substr(1),
+        query_string_only(req),
         req.body.size(),
         headers_to_string(req.headers),
         mask_secret(auth_token),
@@ -595,6 +629,10 @@ int main(int argc, char* argv[]) {
             handle_models(config, req, res);
         });
 
+        server.Get("/models", [&config](const auto& req, auto& res) {
+            handle_models(config, req, res);
+        });
+
         server.Options(R"(/.*)", [](const auto&, auto& res) {
             handle_options(res);
         });
@@ -603,11 +641,11 @@ int main(int argc, char* argv[]) {
             handle_proxy_request(config, url_parts, req, res);
         };
 
-        server.Get(R"(/v1/.*)", proxy_handler);
-        server.Post(R"(/v1/.*)", proxy_handler);
-        server.Put(R"(/v1/.*)", proxy_handler);
-        server.Patch(R"(/v1/.*)", proxy_handler);
-        server.Delete(R"(/v1/.*)", proxy_handler);
+        server.Get(R"(/.*)", proxy_handler);
+        server.Post(R"(/.*)", proxy_handler);
+        server.Put(R"(/.*)", proxy_handler);
+        server.Patch(R"(/.*)", proxy_handler);
+        server.Delete(R"(/.*)", proxy_handler);
 
         app_logger()->info("listening on {}:{}", config.bind_address, config.listen_port);
         if (!server.listen(config.bind_address.c_str(), config.listen_port)) {
