@@ -27,6 +27,7 @@
 - `bind_address`：监听地址，默认 `0.0.0.0`
 - `listen_port`：监听端口
 - `inbound_models`：允许接入的模型名列表，支持多个
+- `model_mappings`：可选的模型映射表，键是入站模型名，值是实际发送到上游的模型名
 - `inbound_api_keys`：允许接入的 API Key 列表，支持多个
 - `outbound_api_url`：上游 OpenAI 风格 API 地址，例如 `https://api.openai.com` 或带版本前缀的 `https://dashscope.aliyuncs.com/compatible-mode/v1`
 - `outbound_api_key`：上游 API Key
@@ -42,6 +43,20 @@
 - `http://host:port/chat/completions`
 
 同时也兼容上游基础地址带或不带 `/v1` 的两种配置，避免出现重复拼接 `/v1/v1/...` 或缺失 `/v1/...` 的问题。
+
+如果前端暴露给业务侧的模型名和上游平台实际模型名不一致，可以使用 `model_mappings` 做改写。例如前端继续传 `hajimi-Ultra`，代理转发时改写成 `qwen-plus`。
+
+示例：
+
+```json
+{
+	"inbound_models": ["hajimi-Ultra", "hajimi-mini"],
+	"model_mappings": {
+		"hajimi-Ultra": "qwen-plus",
+		"hajimi-mini": "qwen-turbo"
+	}
+}
+```
 
 ## 编译要求
 
@@ -136,6 +151,7 @@ curl http://127.0.0.1:8080/v1/chat/completions \
 - 已支持 OpenAI 风格的常见 HTTP 路由转发，例如 `/v1/chat/completions`、`/v1/embeddings`、`/v1/responses`
 - 当前对流式响应采用普通 HTTP 响应透传，不做逐块实时推送优化
 - 若请求 JSON 中存在 `model` 字段，会校验其是否在白名单内
+- 若配置了 `model_mappings`，代理会在转发前自动将请求体中的 `model` 改写为对应的上游模型名
 
 如果你后续要继续增强，优先建议补这几项：
 

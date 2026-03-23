@@ -36,6 +36,25 @@ std::vector<std::string> read_string_array(const nlohmann::json& json, const cha
     return values;
 }
 
+std::unordered_map<std::string, std::string> read_string_map(const nlohmann::json& json, const char* key) {
+    if (!json.contains(key)) {
+        return {};
+    }
+    if (!json.at(key).is_object()) {
+        throw std::runtime_error(std::string("missing or invalid object field: ") + key);
+    }
+
+    std::unordered_map<std::string, std::string> values;
+    for (const auto& [map_key, map_value] : json.at(key).items()) {
+        if (!map_value.is_string()) {
+            throw std::runtime_error(std::string("object field contains non-string value: ") + key);
+        }
+        values.emplace(map_key, map_value.get<std::string>());
+    }
+
+    return values;
+}
+
 std::string read_string(const nlohmann::json& json, const char* key, const std::string& fallback = "") {
     if (!json.contains(key)) {
         return fallback;
@@ -66,6 +85,8 @@ AppConfig load_config(const std::string& path) {
         config.inbound_api_keys.insert(key);
     }
 
+    config.model_mappings = read_string_map(json, "model_mappings");
+
     config.outbound_api_url = read_string(json, "outbound_api_url");
     config.outbound_api_key = read_string(json, "outbound_api_key");
     config.log_dir = read_string(json, "log_dir", config.log_dir);
@@ -81,6 +102,16 @@ AppConfig load_config(const std::string& path) {
     }
     if (config.inbound_api_keys.empty()) {
         throw std::runtime_error("inbound_api_keys must not be empty");
+    }
+
+    for (const auto& [inbound_model, upstream_model] : config.model_mappings) {
+        const auto found = std::find(config.inbound_models.begin(), config.inbound_models.end(), inbound_model);
+        if (found == config.inbound_models.end()) {
+            throw std::runtime_error("model_mappings contains inbound model not present in inbound_models: " + inbound_model);
+        }
+        if (upstream_model.empty()) {
+            throw std::runtime_error("model_mappings contains empty upstream model for inbound model: " + inbound_model);
+        }
     }
 
     if (json.contains("upstream_timeout_seconds")) {

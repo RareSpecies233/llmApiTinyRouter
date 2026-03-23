@@ -38,6 +38,12 @@ struct UpstreamResponse {
     std::string content_type;
 };
 
+struct PreparedRequest {
+    std::string outbound_body;
+    std::optional<std::string> inbound_model;
+    std::optional<std::string> upstream_model;
+};
+
 struct CurlHeaders {
     curl_slist* list = nullptr;
 
@@ -344,19 +350,29 @@ bool should_return_header(const std::string& key) {
     return blocked_headers.find(to_lower_copy(key)) == blocked_headers.end();
 }
 
-void validate_model_if_present(const AppConfig& config, const httplib::Request& req) {
+std::string resolve_upstream_model_name(const AppConfig& config, const std::string& inbound_model) {
+    const auto it = config.model_mappings.find(inbound_model);
+    if (it == config.model_mappings.end()) {
+        return inbound_model;
+    }
+    return it->second;
+}
+
+PreparedRequest prepare_request_for_upstream(const AppConfig& config, const httplib::Request& req) {
+    PreparedRequest prepared{req.body, std::nullopt, std::nullopt};
+
     if (!requires_body(req.method) || req.body.empty()) {
-        return;
+        return prepared;
     }
 
     const auto content_type = to_lower_copy(req.get_header_value("Content-Type"));
     if (content_type.find("application/json") == std::string::npos) {
-        return;
+        return prepared;
     }
 
     const auto json = nlohmann::json::parse(req.body, nullptr, false);
     if (json.is_discarded() || !json.is_object() || !json.contains("model")) {
-        return;
+        return prepared;
     }
 
     if (!json.at("model").is_string()) {
@@ -368,13 +384,25 @@ void validate_model_if_present(const AppConfig& config, const httplib::Request& 
     if (found == config.inbound_models.end()) {
         throw std::runtime_error("model is not allowed: " + model);
     }
+
+    prepared.inbound_model = model;
+    prepared.upstream_model = resolve_upstream_model_name(config, model);
+
+    if (*prepared.upstream_model != model) {
+        auto rewritten_json = json;
+        rewritten_json["model"] = *prepared.upstream_model;
+        prepared.outbound_body = rewritten_json.dump();
+    }
+
+    return prepared;
 }
 
 UpstreamResponse forward_request(
     const AppConfig& config,
     const UrlParts& url_parts,
     const std::string& request_id,
-    const httplib::Request& req) {
+    const httplib::Request& req,
+    const std::string& outbound_body) {
     CurlHandle curl;
     if (curl.handle == nullptr) {
         throw std::runtime_error("curl_easy_init failed");
@@ -408,8 +436,8 @@ UpstreamResponse forward_request(
     curl_easy_setopt(curl.handle, CURLOPT_SSL_VERIFYHOST, config.verify_upstream_tls ? 2L : 0L);
 
     if (requires_body(req.method) || req.method == "DELETE") {
-        curl_easy_setopt(curl.handle, CURLOPT_POSTFIELDSIZE_LARGE, static_cast<curl_off_t>(req.body.size()));
-        curl_easy_setopt(curl.handle, CURLOPT_POSTFIELDS, req.body.data());
+        curl_easy_setopt(curl.handle, CURLOPT_POSTFIELDSIZE_LARGE, static_cast<curl_off_t>(outbound_body.size()));
+        curl_easy_setopt(curl.handle, CURLOPT_POSTFIELDS, outbound_body.data());
     }
 
     const auto code = curl_easy_perform(curl.handle);
@@ -490,9 +518,17 @@ void handle_proxy_request(const AppConfig& config, const UrlParts& url_parts, co
         return;
     }
 
+    PreparedRequest prepared_request{req.body, std::nullopt, std::nullopt};
     try {
+        prepared_request = prepare_request_for_upstream(config, req);
         log_request(config, request_id, req, *token);
-        validate_model_if_present(config, req);
+        if (prepared_request.inbound_model.has_value()) {
+            app_logger()->info(
+                "[{}] model mapping inbound_model={} upstream_model={}",
+                request_id,
+                *prepared_request.inbound_model,
+                prepared_request.upstream_model.value_or(*prepared_request.inbound_model));
+        }
     } catch (const std::exception& ex) {
         app_logger()->warn("[{}] request validation failed: {}", request_id, ex.what());
         set_json_error(res, 400, "invalid_request_error", ex.what());
@@ -503,7 +539,7 @@ void handle_proxy_request(const AppConfig& config, const UrlParts& url_parts, co
     const auto start = std::chrono::steady_clock::now();
 
     try {
-        auto upstream_response = forward_request(config, url_parts, request_id, req);
+        auto upstream_response = forward_request(config, url_parts, request_id, req, prepared_request.outbound_body);
         const auto end = std::chrono::steady_clock::now();
         const auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
 
@@ -527,6 +563,7 @@ void handle_proxy_request(const AppConfig& config, const UrlParts& url_parts, co
     } catch (const std::exception& ex) {
         const auto end = std::chrono::steady_clock::now();
         const auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+
         app_logger()->error(
             "[{}] upstream forward failed url={} duration_ms={} error={}",
             request_id,

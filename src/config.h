@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -9,6 +10,7 @@ struct AppConfig {
     int listen_port = 8080;
     std::vector<std::string> inbound_models;
     std::unordered_set<std::string> inbound_api_keys;
+    std::unordered_map<std::string, std::string> model_mappings;
     std::string outbound_api_url;
     std::string outbound_api_key;
     std::string log_dir = "logs";
