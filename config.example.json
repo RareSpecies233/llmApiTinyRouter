@@ -1,0 +1,19 @@
+{
+  "bind_address": "0.0.0.0",
+  "listen_port": 8080,
+  "log_dir": "logs",
+  "request_body_log_limit": 32768,
+  "response_body_log_limit": 32768,
+  "upstream_timeout_seconds": 300,
+  "verify_upstream_tls": true,
+  "inbound_models": [
+    "gpt-4o-mini",
+    "gpt-4.1-mini"
+  ],
+  "inbound_api_keys": [
+    "sk-inbound-example-1",
+    "sk-inbound-example-2"
+  ],
+  "outbound_api_url": "https://api.openai.com",
+  "outbound_api_key": "sk-outbound-example"
+}
