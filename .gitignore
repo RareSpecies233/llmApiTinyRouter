@@ -1,9 +1,9 @@
 llm_prompt.txt
 build
 build-copilot
-
-
-
+build-win32-release
+build-win32-release-manual
+build-win32-release-manual2
 
 
 

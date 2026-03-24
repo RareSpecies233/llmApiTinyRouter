@@ -74,7 +74,7 @@ macOS 上如缺少依赖，可先安装：
 brew install cmake curl openssl
 ```
 
-## 编译方法
+## macOS编译方法
 
 在项目根目录执行：
 
@@ -88,6 +88,9 @@ cmake --build build -j
 ```bash
 build/llm_api_proxy
 ```
+
+# Windows编译方法
+- 见[Windows编译指南](Windows-build.md)
 
 ## 启动方法
 
